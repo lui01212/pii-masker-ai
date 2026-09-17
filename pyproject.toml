@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pii-masker-ai"
+version = "0.1.0"
+description = "Ultra-fast, zero-dependency PII masking and unmasking for AI prompts and LLM agents."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "lui01212", email = "luynbv@glotechvn.com" }
+]
+keywords = [
+    "ai",
+    "llm",
+    "pii",
+    "masking",
+    "redaction",
+    "privacy",
+    "claude",
+    "openai",
+    "agent-security",
+    "prompt-engineering"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = []
+
+[project.scripts]
+pii-masker = "pii_masker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lui01212/pii-masker-ai"
+Repository = "https://github.com/lui01212/pii-masker-ai.git"
+Issues = "https://github.com/lui01212/pii-masker-ai/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pii_masker"]
