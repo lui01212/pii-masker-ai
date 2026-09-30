@@ -259,6 +259,247 @@ class TestPIIMasker(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("pii-masker", buf.getvalue())
 
+    def test_hash_masking_mode(self):
+        from pii_masker.core import MaskMode
+        text = "Contact alice@example.com or alice@example.com again."
+        res = self.masker.mask(text, mode=MaskMode.HASH)
+        self.assertTrue(res.has_pii)
+        # Should be formatted as <EMAIL_xxxxxxxx>
+        self.assertRegex(res.masked_text, r"<EMAIL_[a-f0-9]{8}>")
+        # Check mapping
+        self.assertIn("alice@example.com", res.mapping.values())
+        # Restoring should recover original
+        restored = self.masker.unmask(res.masked_text, res.mapping)
+        self.assertEqual(restored, text)
+
+    def test_hash_masking_custom_salt(self):
+        from pii_masker.core import PIIMasker, MaskMode
+        m1 = PIIMasker(salt="salt-alpha")
+        m2 = PIIMasker(salt="salt-beta")
+        text = "Secret email: dev@corp.io"
+        r1 = m1.mask(text, mode=MaskMode.HASH)
+        r2 = m2.mask(text, mode=MaskMode.HASH)
+        self.assertNotEqual(r1.masked_text, r2.masked_text)
+
+    def test_synthetic_masking_mode(self):
+        from pii_masker.core import MaskMode
+        text = "Reach me at customer@gmail.com or 0901234567."
+        res = self.masker.synthetic_mask(text)
+        self.assertTrue(res.has_pii)
+        self.assertNotIn("customer@gmail.com", res.masked_text)
+        self.assertNotIn("0901234567", res.masked_text)
+        self.assertIn("user1@example.com", res.masked_text)
+        # Restoring
+        restored = self.masker.unmask(res.masked_text, res.mapping)
+        self.assertEqual(restored, text)
+
+    def test_allowlist_exemption(self):
+        from pii_masker.core import PIIMasker
+        # Whitelist public company support email and internal domain
+        masker = PIIMasker(allowlist=["support@mycompany.com", "127.0.0.1"])
+        text = (
+            "Contact public support@mycompany.com or private admin@gmail.com "
+            "at localhost 127.0.0.1 vs server 198.51.100.4."
+        )
+        res = masker.mask(text)
+        # support@mycompany.com and 127.0.0.1 should NOT be masked
+        self.assertIn("support@mycompany.com", res.masked_text)
+        self.assertIn("127.0.0.1", res.masked_text)
+        # admin@gmail.com and 198.51.100.4 MUST be masked
+        self.assertNotIn("admin@gmail.com", res.masked_text)
+        self.assertNotIn("198.51.100.4", res.masked_text)
+
+    def test_langchain_chat_wrapper_round_trip(self):
+        from pii_masker.integrations import PIIChatWrapper
+
+        # Mock LLM that echoes prompt back with an answer
+        class MockLLM:
+            def invoke(self, prompt: str) -> str:
+                # LLM sees <EMAIL_1> and references it
+                return f"Confirmed. Sending notification to {prompt.split()[-1]} now."
+
+        mock_llm = MockLLM()
+        shielded = PIIChatWrapper(mock_llm)
+
+        user_prompt = "Please send invoice to john.doe@acme.corp"
+        output = shielded.invoke(user_prompt)
+
+        # Output must be unmasked back to original email!
+        self.assertIn("john.doe@acme.corp", output)
+        self.assertNotIn("<EMAIL_1>", output)
+
+    def test_langchain_callback_raise_on_pii(self):
+        from pii_masker.integrations import PIILangChainCallback
+        cb = PIILangChainCallback(raise_on_pii=True)
+
+        with self.assertRaises(ValueError) as ctx:
+            cb.on_llm_start({}, ["Here is my key: AKIAIOSFODNN7EXAMPLE"])
+        self.assertIn("PIISecurityException", str(ctx.exception))
+
+    def test_cli_batch_jsonl(self):
+        import tempfile
+        import json
+        from pii_masker.cli import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = f"{tmpdir}/dataset.jsonl"
+            output_file = f"{tmpdir}/sanitized.jsonl"
+            mapping_file = f"{tmpdir}/map.json"
+
+            sample = [
+                {"id": 1, "prompt": "My phone is 0912345678", "tag": "test"},
+                {"id": 2, "prompt": "Email me at dev@corp.vn", "tag": "test2"},
+            ]
+            with open(input_file, "w", encoding="utf-8") as f:
+                for row in sample:
+                    f.write(json.dumps(row) + "\n")
+
+            exit_code = main([
+                "batch",
+                "-i", input_file,
+                "-o", output_file,
+                "--fields", "prompt",
+                "--mode", "redact",
+                "--save-mapping", mapping_file
+            ])
+            self.assertEqual(exit_code, 0)
+
+            with open(output_file, "r", encoding="utf-8") as f:
+                lines = [json.loads(line) for line in f]
+            self.assertEqual(lines[0]["prompt"], "My phone is [PHONE]")
+            self.assertEqual(lines[1]["prompt"], "Email me at [EMAIL]")
+            self.assertEqual(lines[0]["tag"], "test")
+
+    def test_cli_batch_csv(self):
+        import tempfile
+        import csv
+        from pii_masker.cli import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = f"{tmpdir}/dataset.csv"
+            output_file = f"{tmpdir}/sanitized.csv"
+
+            with open(input_file, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["id", "contact", "status"])
+                writer.writeheader()
+                writer.writerow({"id": "1", "contact": "0987654321", "status": "active"})
+
+            exit_code = main([
+                "batch",
+                "-i", input_file,
+                "-o", output_file,
+                "--fields", "contact",
+                "--mode", "reversible"
+            ])
+            self.assertEqual(exit_code, 0)
+
+            with open(output_file, "r", encoding="utf-8", newline="") as f:
+                reader = list(csv.DictReader(f))
+            self.assertIn("<PHONE_1>", reader[0]["contact"])
+            self.assertEqual(reader[0]["status"], "active")
+
+
+    def test_cli_batch_plain_text(self):
+        import tempfile
+        from pii_masker.cli import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = f"{tmpdir}/notes.txt"
+            output_file = f"{tmpdir}/sanitized.txt"
+            with open(input_file, "w", encoding="utf-8") as f:
+                f.write("Note: Email alice@example.com for login.\n")
+
+            exit_code = main(["batch", "-i", input_file, "-o", output_file, "--mode", "redact"])
+            self.assertEqual(exit_code, 0)
+            with open(output_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("Email [EMAIL] for login.", content)
+
+    def test_batch_file_not_found_handled(self):
+        from pii_masker.cli import main
+        exit_code = main(["batch", "-i", "nonexistent_file_xyz_123.jsonl"])
+        self.assertEqual(exit_code, 1)
+
+    def test_allowlist_from_file(self):
+        import tempfile
+        from pii_masker.cli import _load_allowlist
+        with tempfile.TemporaryDirectory() as tmpdir:
+            allow_path = f"{tmpdir}/whitelist.txt"
+            with open(allow_path, "w", encoding="utf-8") as f:
+                f.write("# comments are ignored\ncorp.internal\nadmin@safe.com\n")
+            loaded = _load_allowlist(allow_path)
+            self.assertEqual(loaded, {"corp.internal", "admin@safe.com"})
+
+    def test_mask_empty_and_none_text(self):
+        res = self.masker.mask("")
+        self.assertEqual(res.masked_text, "")
+        self.assertEqual(res.entity_count, 0)
+
+    def test_unmask_empty_mapping(self):
+        text = "Hello world"
+        restored = self.masker.unmask(text, {})
+        self.assertEqual(restored, text)
+
+    def test_mac_address_and_ipv6_masking(self):
+        text = "Host 2001:db8::1 with MAC 00:1A:2B:3C:4D:5E connected."
+        res = self.masker.mask(text, reversible=True)
+        self.assertTrue(res.has_pii)
+        self.assertIn("IPV6_ADDRESS", res.categories)
+        self.assertIn("MAC_ADDRESS", res.categories)
+        restored = self.masker.unmask(res.masked_text, res.mapping)
+        self.assertEqual(restored, text)
+
+    def test_langchain_chat_wrapper_dict_messages(self):
+        from pii_masker.integrations import PIIChatWrapper
+
+        class MockLLM:
+            def invoke(self, messages: list) -> dict:
+                return {"role": "assistant", "content": f"Echo: {messages[0]['content']}"}
+
+        wrapper = PIIChatWrapper(MockLLM())
+        input_messages = [{"role": "user", "content": "My phone is 0912345678"}]
+        resp = wrapper.invoke(input_messages)
+        self.assertIn("0912345678", resp["content"])
+
+    def test_langchain_callback_chat_model_start(self):
+        from pii_masker.integrations import PIILangChainCallback
+
+        class MockMsg:
+            def __init__(self, content):
+                self.content = content
+
+        cb = PIILangChainCallback(raise_on_pii=False)
+        cb.on_chat_model_start({}, [[MockMsg("Key is sk-abcdefghijklmnopqrstuvwx123456")]])
+        self.assertEqual(len(cb.detected_entities), 1)
+        self.assertEqual(cb.detected_entities[0]["category"], "API_KEY")
+
+    def test_synthetic_masking_all_templates(self):
+        from pii_masker.core import PIIMasker, MaskMode
+        m = PIIMasker()
+        text = "IP: 198.51.100.2, Card: 4532-0151-1283-0366, Key: sk-abcdefghijklmnopqrstuvwx123456"
+        res = m.synthetic_mask(text)
+        self.assertIn("198.51.100.1", res.masked_text)
+        self.assertIn("4532-0151-1283-0366", res.masked_text)  # card template
+        self.assertIn("sk-synthetic-api-key-1", res.masked_text)
+        restored = m.unmask(res.masked_text, res.mapping)
+        self.assertEqual(restored, text)
+
+    def test_cli_mask_with_json_and_mode_synthetic(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pii_masker.cli import main
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            exit_code = main(["mask", "Contact 0912345678", "--mode", "synthetic", "--json"])
+        self.assertEqual(exit_code, 0)
+        data = json.loads(buf.getvalue())
+        self.assertEqual(data["mode"], "synthetic")
+        self.assertEqual(data["entities_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

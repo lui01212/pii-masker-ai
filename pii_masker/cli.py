@@ -1,15 +1,28 @@
 """
 Command line interface for pii-masker-ai.
-Supports prompt masking, unmasking, and CI scanning for PII leaks.
+Supports prompt masking, unmasking, CI scanning for PII leaks, and dataset batch sanitization.
 """
 
 import argparse
+import csv
+import io
 import json
 import os
 import sys
+from typing import Dict, List, Optional, Set
 
 from pii_masker import __version__
-from pii_masker.core import PIIMasker
+from pii_masker.core import PIIMasker, MaskMode
+
+
+def _load_allowlist(allowlist_arg: Optional[str]) -> Set[str]:
+    """Parse comma-separated values or file path into a set of exempted tokens."""
+    if not allowlist_arg:
+        return set()
+    if os.path.isfile(allowlist_arg):
+        with open(allowlist_arg, "r", encoding="utf-8") as f:
+            return {line.strip() for line in f if line.strip() and not line.startswith("#")}
+    return {item.strip() for item in allowlist_arg.split(",") if item.strip()}
 
 
 def cmd_mask(args: argparse.Namespace) -> int:
@@ -25,14 +38,23 @@ def cmd_mask(args: argparse.Namespace) -> int:
     else:
         text = sys.stdin.read()
 
-    masker = PIIMasker()
-    result = masker.mask(text, reversible=not args.redact)
+    # Determine mode
+    mode = MaskMode.REVERSIBLE
+    if getattr(args, "redact", False):
+        mode = MaskMode.REDACT
+    elif getattr(args, "mode", None):
+        mode = args.mode.lower()
+
+    allowlist = _load_allowlist(getattr(args, "allowlist", None))
+    masker = PIIMasker(allowlist=list(allowlist))
+    result = masker.mask(text, mode=mode)
 
     if args.json:
         payload = {
             "masked_text": result.masked_text,
             "mapping": result.mapping,
             "entities_count": len(result.entities),
+            "mode": mode,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -67,6 +89,101 @@ def cmd_unmask(args: argparse.Namespace) -> int:
 
     restored = PIIMasker.unmask(text, mapping)
     print(restored)
+    return 0
+
+
+def cmd_batch(args: argparse.Namespace) -> int:
+    """Batch sanitize dataset files (.jsonl, .csv, .txt) with zero dependencies."""
+    input_path = args.input
+    if not os.path.exists(input_path):
+        print(f"Error: Input file not found: {input_path}", file=sys.stderr)
+        return 1
+
+    # Detect format
+    fmt = (args.format or "").lower()
+    if not fmt:
+        ext = os.path.splitext(input_path)[1].lower()
+        if ext == ".jsonl":
+            fmt = "jsonl"
+        elif ext == ".csv":
+            fmt = "csv"
+        else:
+            fmt = "txt"
+
+    mode = (args.mode or MaskMode.REVERSIBLE).lower()
+    allowlist = _load_allowlist(args.allowlist)
+    masker = PIIMasker(allowlist=list(allowlist))
+
+    fields = [f.strip() for f in args.fields.split(",")] if args.fields else None
+    cumulative_mapping: Dict[str, str] = {}
+    total_processed = 0
+
+    out_file = open(args.output, "w", encoding="utf-8", newline="") if args.output else sys.stdout
+
+    try:
+        if fmt == "jsonl":
+            with open(input_path, "r", encoding="utf-8", errors="replace") as in_f:
+                for line in in_f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        if isinstance(obj, dict):
+                            keys_to_process = fields if fields else list(obj.keys())
+                            for k in keys_to_process:
+                                if k in obj and isinstance(obj[k], str):
+                                    res = masker.mask(obj[k], mode=mode)
+                                    obj[k] = res.masked_text
+                                    cumulative_mapping.update(res.mapping)
+                        elif isinstance(obj, str):
+                            res = masker.mask(obj, mode=mode)
+                            obj = res.masked_text
+                            cumulative_mapping.update(res.mapping)
+                        out_file.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                        total_processed += 1
+                    except json.JSONDecodeError:
+                        out_file.write(line + "\n")
+
+        elif fmt == "csv":
+            with open(input_path, "r", encoding="utf-8", errors="replace") as in_f:
+                reader = csv.DictReader(in_f)
+                if not reader.fieldnames:
+                    print("Error: Empty or invalid CSV file.", file=sys.stderr)
+                    return 1
+
+                writer = csv.DictWriter(out_file, fieldnames=reader.fieldnames)
+                writer.writeheader()
+
+                keys_to_process = set(fields) if fields else set(reader.fieldnames)
+                for row in reader:
+                    for k in keys_to_process:
+                        if k in row and row[k]:
+                            res = masker.mask(row[k], mode=mode)
+                            row[k] = res.masked_text
+                            cumulative_mapping.update(res.mapping)
+                    writer.writerow(row)
+                    total_processed += 1
+
+        else:  # plain text
+            with open(input_path, "r", encoding="utf-8", errors="replace") as in_f:
+                for line in in_f:
+                    res = masker.mask(line, mode=mode)
+                    cumulative_mapping.update(res.mapping)
+                    out_file.write(res.masked_text)
+                    total_processed += 1
+
+    finally:
+        if args.output:
+            out_file.close()
+
+    if args.save_mapping and cumulative_mapping:
+        with open(args.save_mapping, "w", encoding="utf-8") as f:
+            json.dump(cumulative_mapping, f, ensure_ascii=False, indent=2)
+
+    if args.output:
+        print(f"Batch sanitized {total_processed} record(s) -> {args.output} (mode={mode})")
+
     return 0
 
 
@@ -124,7 +241,10 @@ def main(argv=None) -> int:
     p_mask = subparsers.add_parser("mask", help="Mask or redact PII from text or file")
     p_mask.add_argument("text", nargs="?", help="Text string to mask")
     p_mask.add_argument("-f", "--file", help="Input file path to mask")
-    p_mask.add_argument("--redact", action="store_true", help="Permanently redact with [TYPE] instead of <TYPE_N>")
+    p_mask.add_argument("--mode", choices=["reversible", "redact", "hash", "synthetic"], default="reversible",
+                        help="Masking strategy (default: reversible)")
+    p_mask.add_argument("--redact", action="store_true", help="Shortcut for --mode redact")
+    p_mask.add_argument("--allowlist", help="Comma-separated string or file path containing tokens to exempt")
     p_mask.add_argument("--json", action="store_true", help="Output result as JSON with mapping")
     p_mask.add_argument("--save-mapping", help="Save unmasking map to a JSON file")
     p_mask.set_defaults(func=cmd_mask)
@@ -135,6 +255,18 @@ def main(argv=None) -> int:
     p_unmask.add_argument("-f", "--file", help="Input masked file path")
     p_unmask.add_argument("-m", "--mapping", required=True, help="Path to JSON mapping file")
     p_unmask.set_defaults(func=cmd_unmask)
+
+    # batch
+    p_batch = subparsers.add_parser("batch", help="Batch sanitize dataset files (.jsonl, .csv, .txt)")
+    p_batch.add_argument("-i", "--input", required=True, help="Input dataset file path")
+    p_batch.add_argument("-o", "--output", help="Output sanitized file path (default: stdout)")
+    p_batch.add_argument("--format", choices=["jsonl", "csv", "txt"], help="Dataset format (inferred if omitted)")
+    p_batch.add_argument("--fields", help="Comma-separated list of JSON/CSV keys to mask")
+    p_batch.add_argument("--mode", choices=["reversible", "redact", "hash", "synthetic"], default="reversible",
+                         help="Masking mode")
+    p_batch.add_argument("--allowlist", help="Comma-separated string or file path containing tokens to exempt")
+    p_batch.add_argument("--save-mapping", help="Save aggregate unmasking mapping to a JSON file")
+    p_batch.set_defaults(func=cmd_batch)
 
     # scan
     p_scan = subparsers.add_parser("scan", help="Scan files or directories for PII leaks")
