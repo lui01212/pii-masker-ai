@@ -11,6 +11,8 @@ import re
 from pii_masker.patterns.base import PIIPattern
 from pii_masker.patterns.global_rules import GLOBAL_PATTERNS
 from pii_masker.patterns.api_keys import API_KEY_PATTERNS
+from pii_masker.patterns.financial import FINANCIAL_PATTERNS
+from pii_masker.patterns.network import NETWORK_PATTERNS
 from pii_masker.patterns.vietnam import VIETNAM_PATTERNS
 
 
@@ -33,37 +35,55 @@ class MaskResult:
     def has_pii(self) -> bool:
         return len(self.entities) > 0
 
+    @property
+    def entity_count(self) -> int:
+        return len(self.entities)
+
+    @property
+    def categories(self) -> Set[str]:
+        return {e.category for e in self.entities}
+
 
 class PIIMasker:
     """
     Main PII Masker class for sanitizing text before sending to LLMs.
+    Zero external dependencies.
     """
 
     def __init__(
         self,
         include_global: bool = True,
         include_api_keys: bool = True,
+        include_financial: bool = True,
+        include_network: bool = True,
         countries: Optional[List[str]] = None,
         custom_patterns: Optional[List[PIIPattern]] = None,
     ):
         self.patterns: List[PIIPattern] = []
-        
+
         if include_global:
             self.patterns.extend(GLOBAL_PATTERNS)
-            
+
         if include_api_keys:
             self.patterns.extend(API_KEY_PATTERNS)
-            
-        if countries is None or "VN" in [c.upper() for c in countries]:
+
+        if include_financial:
+            self.patterns.extend(FINANCIAL_PATTERNS)
+
+        if include_network:
+            self.patterns.extend(NETWORK_PATTERNS)
+
+        country_set = {c.upper() for c in countries} if countries else {"VN"}
+        if "VN" in country_set:
             self.patterns.extend(VIETNAM_PATTERNS)
-            
+
         if custom_patterns:
             self.patterns.extend(custom_patterns)
 
     def mask(self, text: str, reversible: bool = True) -> MaskResult:
         """
         Detect and mask PII in text.
-        If reversible=True, generates placeholders like `<EMAIL_1>`, `<PHONE_1>`.
+        If reversible=True, generates numbered placeholders like `<EMAIL_1>`, `<PHONE_1>`.
         If reversible=False, permanently redacts with `[EMAIL]`, `[PHONE]`.
         """
         if not text:
@@ -71,17 +91,20 @@ class PIIMasker:
 
         # Step 1: Find all matches across all patterns
         matches: List[Tuple[int, int, str, str]] = []  # (start, end, category, original_text)
-        
+
         for pattern in self.patterns:
             for m in pattern.regex.finditer(text):
                 start, end = m.span()
                 matched_str = text[start:end]
+                # Validate match if validator is provided
+                if pattern.validator and not pattern.validator(matched_str):
+                    continue
                 matches.append((start, end, pattern.category, matched_str))
 
-        # Sort matches by start position, then by length (longest match wins on overlap)
+        # Sort matches by start position, then by length descending (longest match wins on overlap)
         matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
 
-        # Step 2: Remove overlapping intervals (greedy non-overlapping)
+        # Step 2: Remove overlapping intervals (greedy longest non-overlapping)
         non_overlapping: List[Tuple[int, int, str, str]] = []
         last_end = -1
         for start, end, category, matched_str in matches:
@@ -89,12 +112,11 @@ class PIIMasker:
                 non_overlapping.append((start, end, category, matched_str))
                 last_end = end
 
-        # Step 3: Replace from right to left or build new string
+        # Step 3: Assign placeholders and build mapping
         category_counters: Dict[str, int] = {}
         mapping: Dict[str, str] = {}
         entities: List[DetectedEntity] = []
 
-        # We will process in order to assign sequential numbers like <EMAIL_1>, <EMAIL_2>
         for start, end, category, matched_str in non_overlapping:
             if reversible:
                 category_counters[category] = category_counters.get(category, 0) + 1
@@ -125,6 +147,10 @@ class PIIMasker:
         masked_text = "".join(result_chars)
         return MaskResult(masked_text=masked_text, mapping=mapping, entities=entities)
 
+    def redact(self, text: str) -> str:
+        """Convenience method for permanent non-reversible redaction."""
+        return self.mask(text, reversible=False).masked_text
+
     @staticmethod
     def unmask(text: str, mapping: Dict[str, str]) -> str:
         """
@@ -139,12 +165,19 @@ class PIIMasker:
         return result
 
 
-# Convenience functions
+# Module-level convenience functions
 _default_masker = PIIMasker()
+
 
 def mask_text(text: str, reversible: bool = True) -> MaskResult:
     """Mask text using default settings."""
     return _default_masker.mask(text, reversible=reversible)
+
+
+def redact_text(text: str) -> str:
+    """Permanently redact PII from text."""
+    return _default_masker.redact(text)
+
 
 def unmask_text(text: str, mapping: Dict[str, str]) -> str:
     """Unmask text using the mapping returned from mask_text."""

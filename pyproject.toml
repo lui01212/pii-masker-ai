@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pii-masker-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ultra-fast, zero-dependency PII masking and unmasking for AI prompts and LLM agents."
 readme = "README.md"
 requires-python = ">=3.8"
