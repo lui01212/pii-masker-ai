@@ -5,10 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://github.com/lui01212/pii-masker-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lui01212/pii-masker-ai/actions)
 [![good first issues](https://img.shields.io/github/issues/lui01212/pii-masker-ai/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/lui01212/pii-masker-ai/issues?q=is%3Aissue+state%3Aopen+label%3A%22good+first+issue%22)
+[![Hacktoberfest](https://img.shields.io/badge/Hacktoberfest-2024-ff7a59?logo=hacktoberfest)](https://hacktoberfest.com/)
 
 **Ultra-fast, zero-dependency PII masking and reversible unmasking for AI prompts, LLM agents, and vector databases.**
 
-Prevent sensitive customer data (Emails, Phone Numbers, Credit Cards, Citizen IDs, API Keys) from leaking into external AI models (Claude, OpenAI, Gemini).
+Prevent sensitive customer data (Emails, Phone Numbers, Credit Cards, Citizen IDs, API Keys, Private Keys, IP Addresses) from leaking into external AI models (Claude, OpenAI, Gemini).
 
 ---
 
@@ -34,8 +35,12 @@ sequenceDiagram
 
 - **Zero dependencies:** Written in 100% pure Python standard library. Instant install, zero attack surface.
 - **Bi-directional Reversible Masking:** Masks with sequential placeholders (`<EMAIL_1>`, `<PHONE_1>`) so the LLM retains conversational context, then restores original data upon return.
-- **Permanent Redaction:** Supports redacting with fixed tags (`[EMAIL]`, `[API_KEY]`) for logging and training datasets.
-- **Country & Specialized Packs:** Out-of-the-box support for Global rules (Email, IP, Credit Cards), API Keys (OpenAI, Anthropic, GitHub, AWS), and Vietnam (CCCD, CMND, Phone numbers).
+- **Permanent Redaction:** Supports redacting with fixed tags (`[EMAIL]`, `[API_KEY]`, `[CREDIT_CARD]`) for logging and training datasets.
+- **Comprehensive Pattern Suite (v0.2.0):**
+  - **Financial:** Credit cards (Visa, MasterCard, Amex, Discover, JCB) with **Luhn algorithm verification**, IBAN bank codes.
+  - **Network:** Public IPv4, IPv6 addresses, MAC addresses.
+  - **Secrets & API Keys:** JWT tokens, PEM Private Keys (`RSA`, `EC`), OpenAI, Anthropic, GitHub, AWS, Slack, Stripe, Google Cloud.
+  - **Global & Regional:** Email, US SSN, International phone (E.164), Vietnam Citizen ID (CCCD/CMND), Tax ID, Passports.
 - **CLI & CI Scanner:** Built-in scanner to detect PII leaks in text/code files during pre-commit or CI/CD pipelines.
 
 ---

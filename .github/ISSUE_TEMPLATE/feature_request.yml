@@ -1,0 +1,27 @@
+name: "💡 Feature Request"
+description: Propose a new PII detection pattern, format, or capability.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome requests for new PII patterns, country standards, and privacy utilities!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use Case / Missing PII Pattern
+      description: What PII category, credential type, or country regulation is missing?
+    validations:
+      required: true
+  - type: textarea
+    id: sample_data
+    attributes:
+      label: Sample Test Cases (Synthetic Data Only)
+      description: Provide 2-3 synthetic/fake test examples demonstrating this PII format.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution or Regex Idea
+      description: Suggest regex rules or checksum algorithms (e.g., Luhn, IBAN, country spec).
