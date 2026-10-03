@@ -5,11 +5,36 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://github.com/lui01212/pii-masker-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lui01212/pii-masker-ai/actions)
 [![good first issues](https://img.shields.io/github/issues/lui01212/pii-masker-ai/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/lui01212/pii-masker-ai/issues?q=is%3Aissue+state%3Aopen+label%3A%22good+first+issue%22)
-[![Hacktoberfest](https://img.shields.io/badge/Hacktoberfest-2024-ff7a59?logo=hacktoberfest)](https://hacktoberfest.com/)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-7057ff)](CONTRIBUTING.md)
 
 **Ultra-fast, zero-dependency PII masking, redaction, and de-identification for AI prompts, LLM agents, and datasets.**
 
-Prevent sensitive customer data (Emails, Phone Numbers, Credit Cards, Citizen IDs, API Keys, Private Keys, IP Addresses) from leaking into external AI models (Claude, OpenAI, Gemini).
+Detect and mask supported patterns before sending text to an external model. Review the output: pattern matching cannot guarantee that all sensitive data has been removed.
+
+## Start here: your first contribution
+
+**[Featured beginner issue #11](https://github.com/lui01212/pii-masker-ai/issues/11)**: Write a first redaction walkthrough using synthetic data.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, claiming an issue, and opening a draft PR.
+
+Repository: `pii-masker-ai`; PyPI distribution: `pii-masker-ai`; Python import: `pii_masker`.
+The installed CLI is pii-masker.
+
+Try this from a reviewed source checkout, in the repository root, with Python 3.8+.
+It uses synthetic inputs and needs no API key or network access:
+
+```python
+from pii_masker import redact_text
+print(redact_text("Contact demo@example.com"))
+```
+
+Expected output:
+
+```text
+Contact [EMAIL]
+```
+
+Pattern detection can miss personal data. Review results before sharing them, and keep
+reversible mappings private because they contain original values.
 
 ---
 
@@ -33,7 +58,7 @@ sequenceDiagram
 
 ## 🌟 Key Features
 
-- **Zero dependencies:** Written in 100% pure Python standard library. Instant install, zero attack surface.
+- **Zero dependencies:** Written in 100% pure Python standard library. No third-party runtime dependencies; this does not eliminate security risks.
 - **4 De-identification Modes:**
   1. `reversible`: Sequential numbered tokens (`<EMAIL_1>`, `<PHONE_1>`) for LLM chat round-trips.
   2. `redact`: Fixed redaction tags (`[EMAIL]`, `[API_KEY]`) for audit logs and security reporting.
@@ -172,7 +197,7 @@ pii-masker scan ./data/ --strict
 ## 🤝 Community: Add Your Country's PII Rules!
 
 We are actively expanding localized PII regex rules for more countries!
-Beginner contributors can easily add new rules in under 15 minutes:
+Country-specific rules need format references, synthetic test cases, and validation:
 - 🇫🇷 France (NIR / Carte Vitale)
 - 🇯🇵 Japan (My Number)
 - 🇩🇪 Germany (Steuer-ID)
