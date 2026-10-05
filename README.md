@@ -62,9 +62,9 @@ sequenceDiagram
 - **4 De-identification Modes:**
   1. `reversible`: Sequential numbered tokens (`<EMAIL_1>`, `<PHONE_1>`) for LLM chat round-trips.
   2. `redact`: Fixed redaction tags (`[EMAIL]`, `[API_KEY]`) for audit logs and security reporting.
-  3. `hash`: Salted SHA-256 pseudonym digests (`<EMAIL_a1b2c3d4>`) for persistent agent memory & cross-session consistency.
-  4. `synthetic`: Realistic fake dummy data (`user1@example.com`, `+84901234561`) for realistic model reasoning.
-- **Allowlist & Safe Exemption:** Safely exempt public support emails, internal company domains, or localhost IPs.
+  3. `hash`: Keyed HMAC-SHA256 pseudonyms (`<EMAIL_26d609702036a71b>`) for persistent agent memory; consistent across sessions when you set a salt.
+  4. `synthetic`: Realistic dummy data from reserved and test ranges (`user1@example.com`, `+1-201-555-0100`) for realistic model reasoning.
+- **Allowlist & Safe Exemption:** Exempt exact values, such as a public support email or a known gateway IP (case-insensitive exact match on the detected value).
 - **LangChain & LLM Chat Wrapper:** Wrap any LLM or ChatModel in 1 line of code with automatic prompt masking and response unmasking.
 - **Batch Dataset Sanitizer:** High-speed CLI to sanitize `.jsonl`, `.csv`, and `.txt` datasets with column/field targeting.
 - **Comprehensive Pattern Suite (v0.3.0):**
@@ -106,6 +106,24 @@ print(final_output)
 # Output: "I have drafted the invoice for alice@example.com and notified 0912345678."
 ```
 
+A repeated value always gets the same token. To mask several texts that share one context
+(turns of a conversation, records of a dataset), pass the mapping you have so far: numbering
+continues and known values keep their token, so `mapping.update(result.mapping)` never
+overwrites an entry.
+
+```python
+from pii_masker import mask_text
+
+mapping = {}
+for turn in ["Mail alice@example.com", "Now mail bob@example.com"]:
+    result = mask_text(turn, mapping=mapping)
+    mapping.update(result.mapping)
+# mapping == {"<EMAIL_1>": "alice@example.com", "<EMAIL_2>": "bob@example.com"}
+```
+
+`PIIMasker()` loads the Vietnam rules by default (`countries=["VN"]`); pass `countries=[]`
+to load no country-specific rules.
+
 ### 2. LangChain & Claude Chat Wrapper
 
 ```python
@@ -121,6 +139,12 @@ response = shielded_model.invoke("Send email to alice@company.com with bill $500
 print(response.content)
 ```
 
+The wrapper masks strings, message objects (text content or content blocks), `(role, text)`
+tuples, dict inputs (values, recursively), lists of these, and prompt values; any other input
+raises `TypeError` rather than being sent unmasked. Each `invoke()` uses its own mapping, so
+one wrapper can serve several users. `last_mapping` only shows the most recent call and is not
+thread-safe.
+
 ### 3. Pseudonymization (Hash Mode) & Synthetic Data
 
 ```python
@@ -131,13 +155,23 @@ masker = PIIMasker(salt="company-secret-salt", allowlist=["support@mycompany.com
 # Hash mode for persistent agent memory
 res_hash = masker.mask("User dev@corp.io reported an issue", mode=MaskMode.HASH)
 print(res_hash.masked_text)
-# Output: "User <EMAIL_8f2b3e41> reported an issue"
+# Output (with salt "company-secret-salt"): "User <EMAIL_26d609702036a71b> reported an issue"
 
 # Synthetic replacement
 res_synth = masker.synthetic_mask("Customer phone is 0912345678")
 print(res_synth.masked_text)
-# Output: "Customer phone is +84901234561"
+# Output: "Customer phone is +1-201-555-0100"
 ```
+
+Hash mode is **pseudonymisation, not anonymisation**. Tokens are HMAC-SHA256 digests keyed by
+your salt, so keep the salt secret: anyone who holds it can guess low-entropy values such as
+phone numbers or IDs by hashing candidates. The salt comes from `salt=...`, else the
+`PII_MASKER_SALT` environment variable, else a random per-instance salt (a warning is shown,
+and tokens then differ between processes).
+
+Synthetic values come from reserved or test ranges (`example.com` emails, `555-01xx` phone
+numbers, documentation IP ranges, card numbers that deliberately fail the Luhn check) and are
+unique for each entity, so unmasking restores every value.
 
 ---
 
@@ -156,7 +190,13 @@ pii-masker mask "User 0912345678" --json --save-mapping map.json
 
 # Restore text
 pii-masker unmask "Hello <PHONE_1>" -m map.json
+
+# Hash mode with a stable salt (or set PII_MASKER_SALT)
+pii-masker mask "User 0912345678" --mode hash --salt "$MY_SECRET_SALT"
 ```
+
+Mapping files contain the original values: they are written readable by the owner only and
+should never be committed.
 
 ### Batch Dataset Sanitization (JSONL & CSV)
 ```bash
@@ -167,11 +207,19 @@ pii-masker batch -i raw_dataset.jsonl -o clean_dataset.jsonl --fields prompt,res
 pii-masker batch -i users.csv -o safe_users.csv --fields email,phone --mode synthetic
 ```
 
+One mapping covers the whole run, so tokens never collide between records. JSONL values are
+masked at any depth (numbers too, when they look like PII); lines that are not valid JSON are
+left out of the output, reported on stderr, and make the command exit with code 1. An unknown
+CSV column in `--fields` is an error. The output file must differ from the input file.
+
 ### Scanning files for PII leaks (CI/CD friendly)
 ```bash
 # Returns exit code 1 if any PII leak is found
 pii-masker scan ./data/ --strict
 ```
+
+`scan` checks every non-binary file (including dotfiles such as `.env`) and prints the
+category, `file:line`, and only a short preview of each finding, never the full value.
 
 ---
 
@@ -183,12 +231,15 @@ pii-masker scan ./data/ --strict
 | `PHONE` | International & Vietnamese numbers | `+84912345678`, `0901234567` |
 | `CREDIT_CARD` | Major credit cards with Luhn verification | `4532-xxxx-xxxx-9012` |
 | `IBAN` | International Bank Account Numbers | `DE89370400440532013000` |
-| `IP_ADDRESS` | IPv4 & IPv6 addresses | `198.51.100.1`, `2001:db8::1` |
+| `IP_ADDRESS` | IPv4 addresses (loopback is not reported) | `198.51.100.1` |
+| `IPV6_ADDRESS` | IPv6 addresses | `2001:db8::1`, `fe80::1ff:fe23:4567:890a` |
 | `MAC_ADDRESS` | Network hardware MAC addresses | `00:1A:2B:3C:4D:5E` |
-| `API_KEY` | OpenAI, Anthropic, GitHub, AWS, Stripe keys | `sk-...`, `sk-ant-...`, `ghp_...`, `AKIA...` |
+| `API_KEY` | OpenAI, Anthropic, GitHub, AWS, Slack, Stripe, Google keys, Bearer tokens | `sk-...`, `sk-proj-...`, `sk-ant-...`, `ghp_...`, `AKIA...` |
 | `JWT_TOKEN` | JSON Web Tokens | `eyJhbGci...` |
 | `PRIVATE_KEY` | RSA / EC PEM private keys | `-----BEGIN PRIVATE KEY-----` |
-| `GOV_ID` | National IDs (e.g. VN CCCD 12-digit / US SSN) | `001201012345`, `123-45-6789` |
+| `CREDENTIALS` | `user:password@host` in URLs of any scheme | `postgresql://user:pass@db.example.com` |
+| `SSN` | US Social Security Numbers | `123-45-6789` |
+| `GOV_ID` | National IDs (VN CCCD 12-digit / CMND 9-digit) | `001201012345` |
 | `TAX_ID` | Business tax identification numbers | `0123456789-001` |
 | `PASSPORT` | Passport identification numbers | `B1234567` |
 

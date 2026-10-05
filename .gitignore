@@ -25,3 +25,4 @@ ENV/
 .pytest_cache/
 .ruff_cache/
 mapping.json
+map.json

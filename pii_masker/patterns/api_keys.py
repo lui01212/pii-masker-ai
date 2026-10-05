@@ -6,9 +6,10 @@ import re
 from typing import List
 from pii_masker.patterns.base import PIIPattern
 
-# OpenAI API Key: sk-...
+# OpenAI API Key: sk-..., sk-proj-..., sk-svcacct-..., sk-admin-... (any length).
+# The lookbehind anchors the match at the start of a token so "sk-sk-sk-..." stays linear.
 OPENAI_KEY_REGEX = re.compile(
-    r"\bsk-[a-zA-Z0-9]{10,64}\b"
+    r"(?<![A-Za-z0-9_-])sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}"
 )
 
 # Anthropic API Key: sk-ant-...
@@ -26,9 +27,10 @@ AWS_KEY_REGEX = re.compile(
     r"\b(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}\b"
 )
 
-# Generic Bearer Token in authorization headers
+# Generic Bearer Token in authorization headers: "Bearer" followed by a token-like value
+# (16+ token characters including a digit), so prose such as "the bearer of bad news" is ignored.
 BEARER_TOKEN_REGEX = re.compile(
-    r"(?i)\bBearer\s+[a-zA-Z0-9\-._~+/]+=*"
+    r"\bBearer\s+(?=[a-zA-Z0-9\-._~+/]*\d)[a-zA-Z0-9\-._~+/]{16,}=*"
 )
 
 # JSON Web Token (JWT): 3 base64url segments separated by dots, starting with eyJ
@@ -37,8 +39,10 @@ JWT_TOKEN_REGEX = re.compile(
 )
 
 # PEM Private Keys (RSA, EC, DSA, OPENSSH, etc.)
+# The body cannot contain "-----", so a header without an END line fails at the next
+# header instead of rescanning the rest of the text (keeps repeated headers linear).
 PRIVATE_KEY_REGEX = re.compile(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[^-]*(?:-(?!----)[^-]*)*-----END [A-Z ]*PRIVATE KEY-----"
 )
 
 # Slack API Tokens (Bot, User, App) with hyphenated sections: xoxb-1234-5678-abcd
@@ -51,20 +55,20 @@ GOOGLE_API_KEY_REGEX = re.compile(
     r"\bAIza[0-9A-Za-z\-_]{35}\b"
 )
 
-# Stripe API Keys (secret / publishable, test or live)
+# Stripe API Keys (secret / publishable / restricted, test or live, any length)
 STRIPE_KEY_REGEX = re.compile(
-    r"\b(?:sk|pk)_(?:test|live)_[0-9a-zA-Z]{24,34}\b"
+    r"(?<![0-9A-Za-z])(?:sk|pk|rk)_(?:test|live)_[0-9a-zA-Z]{10,}"
 )
 
 API_KEY_PATTERNS: List[PIIPattern] = [
-    PIIPattern(category="API_KEY", regex=OPENAI_KEY_REGEX, description="OpenAI API Key"),
-    PIIPattern(category="API_KEY", regex=ANTHROPIC_KEY_REGEX, description="Anthropic API Key"),
-    PIIPattern(category="API_KEY", regex=GITHUB_TOKEN_REGEX, description="GitHub Token"),
-    PIIPattern(category="API_KEY", regex=AWS_KEY_REGEX, description="AWS Access Key"),
-    PIIPattern(category="API_KEY", regex=BEARER_TOKEN_REGEX, description="Generic Bearer Token"),
-    PIIPattern(category="JWT_TOKEN", regex=JWT_TOKEN_REGEX, description="JSON Web Token (JWT)"),
-    PIIPattern(category="PRIVATE_KEY", regex=PRIVATE_KEY_REGEX, description="PEM Formatted Private Key"),
-    PIIPattern(category="API_KEY", regex=SLACK_TOKEN_REGEX, description="Slack API Token"),
-    PIIPattern(category="API_KEY", regex=GOOGLE_API_KEY_REGEX, description="Google Cloud API Key"),
-    PIIPattern(category="API_KEY", regex=STRIPE_KEY_REGEX, description="Stripe API Key"),
+    PIIPattern(category="API_KEY", regex=OPENAI_KEY_REGEX, description="OpenAI API Key", priority=1),
+    PIIPattern(category="API_KEY", regex=ANTHROPIC_KEY_REGEX, description="Anthropic API Key", priority=1),
+    PIIPattern(category="API_KEY", regex=GITHUB_TOKEN_REGEX, description="GitHub Token", priority=1),
+    PIIPattern(category="API_KEY", regex=AWS_KEY_REGEX, description="AWS Access Key", priority=1),
+    PIIPattern(category="API_KEY", regex=BEARER_TOKEN_REGEX, description="Generic Bearer Token", priority=1),
+    PIIPattern(category="JWT_TOKEN", regex=JWT_TOKEN_REGEX, description="JSON Web Token (JWT)", priority=1),
+    PIIPattern(category="PRIVATE_KEY", regex=PRIVATE_KEY_REGEX, description="PEM Formatted Private Key", priority=1),
+    PIIPattern(category="API_KEY", regex=SLACK_TOKEN_REGEX, description="Slack API Token", priority=1),
+    PIIPattern(category="API_KEY", regex=GOOGLE_API_KEY_REGEX, description="Google Cloud API Key", priority=1),
+    PIIPattern(category="API_KEY", regex=STRIPE_KEY_REGEX, description="Stripe API Key", priority=1),
 ]

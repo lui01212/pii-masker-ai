@@ -262,10 +262,10 @@ class TestPIIMasker(unittest.TestCase):
     def test_hash_masking_mode(self):
         from pii_masker.core import MaskMode
         text = "Contact alice@example.com or alice@example.com again."
-        res = self.masker.mask(text, mode=MaskMode.HASH)
+        res = PIIMasker(salt="test-salt").mask(text, mode=MaskMode.HASH)
         self.assertTrue(res.has_pii)
-        # Should be formatted as <EMAIL_xxxxxxxx>
-        self.assertRegex(res.masked_text, r"<EMAIL_[a-f0-9]{8}>")
+        # Should be formatted as <EMAIL_xxxxxxxxxxxxxxxx> (16 hex characters of HMAC-SHA256)
+        self.assertRegex(res.masked_text, r"<EMAIL_[a-f0-9]{16}>")
         # Check mapping
         self.assertIn("alice@example.com", res.mapping.values())
         # Restoring should recover original
@@ -295,16 +295,17 @@ class TestPIIMasker(unittest.TestCase):
 
     def test_allowlist_exemption(self):
         from pii_masker.core import PIIMasker
-        # Whitelist public company support email and internal domain
-        masker = PIIMasker(allowlist=["support@mycompany.com", "127.0.0.1"])
+        # Whitelist public company support email and a known gateway IP
+        masker = PIIMasker(allowlist=["support@mycompany.com", "192.0.2.1"])
         text = (
             "Contact public support@mycompany.com or private admin@gmail.com "
-            "at localhost 127.0.0.1 vs server 198.51.100.4."
+            "at gateway 192.0.2.1 vs server 198.51.100.4."
         )
+        self.assertIn("192.0.2.1", PIIMasker().mask(text).mapping.values())  # detected without allowlist
         res = masker.mask(text)
-        # support@mycompany.com and 127.0.0.1 should NOT be masked
+        # support@mycompany.com and 192.0.2.1 should NOT be masked
         self.assertIn("support@mycompany.com", res.masked_text)
-        self.assertIn("127.0.0.1", res.masked_text)
+        self.assertIn("192.0.2.1", res.masked_text)
         # admin@gmail.com and 198.51.100.4 MUST be masked
         self.assertNotIn("admin@gmail.com", res.masked_text)
         self.assertNotIn("198.51.100.4", res.masked_text)
@@ -478,9 +479,10 @@ class TestPIIMasker(unittest.TestCase):
         m = PIIMasker()
         text = "IP: 198.51.100.2, Card: 4532-0151-1283-0366, Key: sk-abcdefghijklmnopqrstuvwx123456"
         res = m.synthetic_mask(text)
-        self.assertIn("198.51.100.1", res.masked_text)
-        self.assertIn("4532-0151-1283-0366", res.masked_text)  # card template
-        self.assertIn("sk-synthetic-api-key-1", res.masked_text)
+        self.assertIn("198.51.100.100", res.masked_text)  # RFC 5737 documentation range
+        self.assertIn("4111-1100-0000-0014", res.masked_text)  # card that fails Luhn on purpose
+        self.assertNotIn("4532-0151-1283-0366", res.masked_text)
+        self.assertIn("sk-synthetic-000000000001", res.masked_text)
         restored = m.unmask(res.masked_text, res.mapping)
         self.assertEqual(restored, text)
 

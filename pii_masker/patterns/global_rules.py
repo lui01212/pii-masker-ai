@@ -6,9 +6,10 @@ import re
 from typing import List
 from pii_masker.patterns.base import PIIPattern
 
-# Email regex
+# Email regex. The local part starts only where a run of local-part characters starts
+# (a lookbehind instead of \b), so inputs like "1.1.1.1..." are scanned once, not quadratically.
 EMAIL_REGEX = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    r"(?<![A-Za-z0-9_.%+\-])[A-Za-z0-9_.%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 
 # US Social Security Number (SSN: 3 digits - 2 digits - 4 digits, excluding invalid area numbers)
@@ -25,14 +26,17 @@ GENERIC_PHONE_REGEX = re.compile(
     r"\b\d{3,4}[-.\s]\d{3,4}[-.\s]\d{3,4}\b"
 )
 
-# Password embedded in URLs (e.g., postgresql://user:password@host:5432/db)
+# Password embedded in URLs of any scheme (e.g. postgresql+psycopg2://user:password@host:5432/db,
+# mongodb+srv://..., amqp://..., rediss://...). The match is scheme://user:password@host: the
+# password runs to the last "@" before the host, so a password containing "@" is masked whole.
 URL_CREDENTIALS_REGEX = re.compile(
-    r"\b(?:https?|ftp|postgres|postgresql|mysql|mongodb|redis)://[a-zA-Z0-9_\-\.%]+:([a-zA-Z0-9_\-\.%!$&'()*+,;=]+)@"
+    r"(?<![A-Za-z0-9+.\-])[A-Za-z][A-Za-z0-9+.\-]*://[^\s/?#@:]*:[^\s/?#]*@"
+    r"(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~%\-]+)"
 )
 
 GLOBAL_PATTERNS: List[PIIPattern] = [
     PIIPattern(category="EMAIL", regex=EMAIL_REGEX, description="Standard Email address"),
     PIIPattern(category="SSN", regex=US_SSN_REGEX, description="US Social Security Number (SSN)", country="US"),
     PIIPattern(category="PHONE", regex=GENERIC_PHONE_REGEX, description="International Formatted Phone Number"),
-    PIIPattern(category="CREDENTIALS", regex=URL_CREDENTIALS_REGEX, description="Credentials in Connection URL"),
+    PIIPattern(category="CREDENTIALS", regex=URL_CREDENTIALS_REGEX, description="Credentials in Connection URL", priority=1),
 ]

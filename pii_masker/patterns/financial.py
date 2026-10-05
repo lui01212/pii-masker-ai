@@ -68,10 +68,17 @@ CREDIT_CARD_REGEX = re.compile(
     r"\b\d{4}[-\s]\d{6}[-\s]\d{5}\b)"          # Formatted 15 digits (Amex)
 )
 
-# IBAN pattern: 2 letter country code, 2 digits, up to 30 alphanumeric characters
+# IBAN pattern: 2 letter country code, 2 digits, up to 30 alphanumeric characters,
+# either unspaced or printed in space-separated groups of four (DE89 3704 0044 ...)
 IBAN_REGEX = re.compile(
-    r"\b[A-Z]{2}\d{2}[A-Za-z0-9]{4}\d{7}(?:[A-Za-z0-9]){0,18}\b"
+    r"\b[A-Z]{2}\d{2}(?:[A-Za-z0-9]{11,30}|(?: [A-Za-z0-9]{4}){2,7}(?: [A-Za-z0-9]{1,4})?)\b"
 )
+
+
+def _iban_match_validator(candidate: str) -> bool:
+    """Require some digits in the account part (as real BBANs have), then the mod-97 check."""
+    return sum(c.isdigit() for c in candidate[4:]) >= 7 and iban_validator(candidate)
+
 
 FINANCIAL_PATTERNS: List[PIIPattern] = [
     PIIPattern(
@@ -79,11 +86,13 @@ FINANCIAL_PATTERNS: List[PIIPattern] = [
         regex=CREDIT_CARD_REGEX,
         description="Major credit card number (Visa, MC, Amex, Discover, JCB) with Luhn validation",
         validator=luhn_checksum,
+        priority=1,
     ),
     PIIPattern(
         category="IBAN",
         regex=IBAN_REGEX,
         description="International Bank Account Number (IBAN)",
-        validator=iban_validator,
+        validator=_iban_match_validator,
+        priority=1,
     ),
 ]

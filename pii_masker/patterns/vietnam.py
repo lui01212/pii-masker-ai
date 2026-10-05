@@ -25,7 +25,7 @@ def validate_vietnam_cccd(cccd_str: str) -> bool:
 
 # Vietnam Phone Numbers: +84, 84, or 0 followed by 3, 5, 7, 8, 9 and 8 digits
 VN_PHONE_REGEX = re.compile(
-    r"(?:\+84|84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}\b"
+    r"(?<!\d)(?:\+84|84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}\b"
 )
 
 # Vietnam CCCD (12 digits starting with 0)
