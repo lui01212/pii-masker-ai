@@ -2,10 +2,10 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/pii-masker-ai.svg)](https://pypi.org/project/pii-masker-ai/)
 [![Python versions](https://img.shields.io/pypi/pyversions/pii-masker-ai.svg)](https://pypi.org/project/pii-masker-ai/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/lui01212/pii-masker-ai/blob/main/LICENSE)
 [![Tests](https://github.com/lui01212/pii-masker-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lui01212/pii-masker-ai/actions)
 [![good first issues](https://img.shields.io/github/issues/lui01212/pii-masker-ai/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/lui01212/pii-masker-ai/issues?q=is%3Aissue+state%3Aopen+label%3A%22good+first+issue%22)
-[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-7057ff)](CONTRIBUTING.md)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-7057ff)](https://github.com/lui01212/pii-masker-ai/blob/main/CONTRIBUTING.md)
 
 **Ultra-fast, zero-dependency PII masking, redaction, and de-identification for AI prompts, LLM agents, and datasets.**
 
@@ -14,7 +14,7 @@ Detect and mask supported patterns before sending text to an external model. Rev
 ## Start here: your first contribution
 
 **[Featured beginner issue #11](https://github.com/lui01212/pii-masker-ai/issues/11)**: Write a first redaction walkthrough using synthetic data.
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, claiming an issue, and opening a draft PR.
+Read [CONTRIBUTING.md](https://github.com/lui01212/pii-masker-ai/blob/main/CONTRIBUTING.md) for setup, claiming an issue, and opening a draft PR.
 
 Repository: `pii-masker-ai`; PyPI distribution: `pii-masker-ai`; Python import: `pii_masker`.
 The installed CLI is pii-masker.
@@ -203,10 +203,10 @@ Country-specific rules need format references, synthetic test cases, and validat
 - 🇩🇪 Germany (Steuer-ID)
 - 🇬🇧 UK (National Insurance Number)
 
-Check out [CONTRIBUTING.md](CONTRIBUTING.md) to claim a country module!
+See [CONTRIBUTING.md](https://github.com/lui01212/pii-masker-ai/blob/main/CONTRIBUTING.md) to get started.
 
 ---
 
 ## 📄 License
 
-[MIT License](LICENSE) © 2026 lui01212
+[MIT License](https://github.com/lui01212/pii-masker-ai/blob/main/LICENSE) © 2026 lui01212
